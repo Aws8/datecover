@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>DateCover</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DateCover">
+<meta name="theme-color" content="#0b0d10">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#15181d; --panel2:#1d2128; --line:#2a2f38;
+    --txt:#eef1f5; --mut:#9aa3af; --acc:#4f8cff; --acc2:#2f6bea; --danger:#ff5d5d;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  body{display:flex;flex-direction:column;overscroll-behavior:none}
+  header{display:flex;align-items:center;justify-content:space-between;
+    padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:17px;margin:0;font-weight:650;letter-spacing:.2px}
+  header .count{font-size:13px;color:var(--mut)}
+  main{flex:1;overflow-y:auto;padding:14px;-webkit-overflow-scrolling:touch}
+  .drop{border:1.5px dashed var(--line);border-radius:14px;padding:34px 16px;text-align:center;color:var(--mut);
+    background:var(--panel);font-size:15px;line-height:1.5}
+  .drop b{color:var(--txt)}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .cell{position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;background:var(--panel2);
+    border:1px solid var(--line)}
+  .cell canvas{width:100%;height:100%;object-fit:cover;display:block}
+  .cell .rm{position:absolute;top:5px;right:5px;width:24px;height:24px;border-radius:50%;
+    background:rgba(0,0,0,.72);color:#fff;border:none;font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center}
+  .toolbar{display:flex;gap:8px;padding:10px 14px calc(10px + var(--safe-b));border-top:1px solid var(--line);
+    background:var(--panel);align-items:center;flex-wrap:wrap}
+  .seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .seg button{background:transparent;border:none;color:var(--mut);padding:10px 14px;font-size:14px;font-weight:600}
+  .seg button.on{background:var(--acc);color:#fff}
+  .btn{background:var(--acc);border:none;color:#fff;border-radius:10px;padding:11px 16px;font-size:15px;font-weight:650}
+  .btn:active{background:var(--acc2)}
+  .btn.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
+  .btn.grow{flex:1}
+  .btn:disabled{opacity:.45}
+  .row{display:flex;align-items:center;gap:10px;width:100%}
+  .row label{font-size:13px;color:var(--mut);white-space:nowrap}
+  input[type=range]{flex:1;accent-color:var(--acc);height:28px}
+  /* editor overlay */
+  .ed{position:fixed;inset:0;background:#000;display:none;flex-direction:column;z-index:20}
+  .ed.open{display:flex}
+  .ed .stage{flex:1;position:relative;overflow:hidden;touch-action:none;display:flex;align-items:center;justify-content:center}
+  .ed .imgwrap{position:relative;line-height:0}
+  .ed .imgwrap canvas{max-width:100%;display:block}
+  .mask{position:absolute;border:1.5px solid var(--acc);background:rgba(79,140,255,.18);border-radius:2px}
+  .mask.black{background:rgba(0,0,0,.85);border-color:#666}
+  .mask .hd{position:absolute;width:26px;height:26px;right:-14px;bottom:-14px;border-radius:50%;
+    background:var(--acc);border:2px solid #fff}
+  .ed .bar{display:flex;gap:8px;padding:10px 14px calc(10px + var(--safe-b));background:var(--panel);
+    border-top:1px solid var(--line);align-items:center;flex-wrap:wrap}
+  .ed .nav{position:absolute;top:calc(10px + env(safe-area-inset-top,0px));left:0;right:0;display:flex;
+    justify-content:space-between;padding:0 12px;pointer-events:none}
+  .ed .nav button{pointer-events:auto;background:rgba(0,0,0,.6);border:1px solid var(--line);color:#fff;
+    border-radius:10px;padding:8px 12px;font-size:14px}
+  .toast{position:fixed;left:50%;bottom:calc(24px + var(--safe-b));transform:translateX(-50%);
+    background:#222a33;border:1px solid var(--line);color:var(--txt);padding:10px 18px;border-radius:12px;
+    font-size:14px;display:none;z-index:40;white-space:nowrap}
+  .busy{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:50}
+  .busy .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 30px;text-align:center;font-size:15px}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <h1>DateCover</h1>
+  <span class="count" id="count"></span>
+</header>
+
+<main id="main">
+  <div class="drop" id="drop">
+    <b>Tap to add photos</b><br>
+    or drop them here — 20+ at once is fine.<br>
+    Everything stays on this phone.
+  </div>
+  <div class="grid" id="grid"></div>
+</main>
+
+<div class="toolbar">
+  <div class="seg" id="modeSeg">
+    <button data-m="blur" class="on">Blur</button>
+    <button data-m="black">Black box</button>
+  </div>
+  <button class="btn ghost" id="addBtn">+ Photos</button>
+  <button class="btn grow" id="saveAll" disabled>Save all</button>
+  <div class="row">
+    <label>Box width</label>
+    <input type="range" id="wRange" min="15" max="90" value="52">
+    <label>Height</label>
+    <input type="range" id="hRange" min="3" max="16" value="8">
+    <label>Card every 5</label>
+    <input type="checkbox" id="sepToggle" checked style="width:22px;height:22px;flex:0">
+  </div>
+</div>
+
+<div class="ed" id="ed">
+  <div class="nav">
+    <button id="edBack">‹ Back</button>
+    <button id="edSave">Save this one</button>
+  </div>
+  <div class="stage" id="stage">
+    <div class="imgwrap" id="imgwrap">
+      <canvas id="edCanvas"></canvas>
+      <div class="mask" id="mask"><div class="hd" id="hd"></div></div>
+    </div>
+  </div>
+  <div class="bar">
+    <button class="btn ghost" id="applyAll">Same box for all</button>
+    <div class="seg" id="edModeSeg">
+      <button data-m="blur" class="on">Blur</button>
+      <button data-m="black">Black box</button>
+    </div>
+  </div>
+</div>
+
+<div class="busy" id="busy"><div class="card" id="busyTxt">Working…</div></div>
+<div class="toast" id="toast"></div>
+<input type="file" id="file" accept="image/*" multiple hidden>
+
+<script>
+"use strict";
+/* ---------- state ---------- */
+const items = [];            // {id,name,file,img,w,h,box:{x,y,w,h},proc}
+let mode = "blur";           // global default for new items
+let seq = 0;
+const $ = s => document.querySelector(s);
+const grid = $("#grid"), countEl = $("#count"), file = $("#file");
+
+function newBox(){ return {x:0.01, y:0.90, w:parseFloat($("#wRange").value)/100, h:parseFloat($("#hRange").value)/100}; }
+
+/* ---------- image loading (EXIF-safe) ---------- */
+async function loadImage(f){
+  try{
+    const b = await createImageBitmap(f, {imageOrientation:"from-image"});
+    return {img:b, w:b.width, h:b.height};
+  }catch(e){
+    const url = URL.createObjectURL(f);
+    const im = await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url;});
+    return {img:im, w:im.naturalWidth, h:im.naturalHeight, url};
+  }
+}
+
+/* ---------- processing ---------- */
+function process(it, tw, th){
+  // draws it.img into a canvas of tw x th with the cover applied
+  const w = it.w, h = it.h;
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const x = c.getContext("2d");
+  x.drawImage(it.img, 0, 0, w, h);
+  applyCover(x, w, h, it.box, mode);
+  if(!tw) return c;
+  const s = Math.min(tw/w, th/h, 1);
+  const o = document.createElement("canvas");
+  o.width = Math.max(1,Math.round(w*s)); o.height = Math.max(1,Math.round(h*s));
+  o.getContext("2d").drawImage(c,0,0,o.width,o.height);
+  return o;
+}
+function applyCover(x, w, h, box, m){
+  const bx = Math.round(box.x*w), by = Math.round(box.y*h);
+  const bw = Math.max(1,Math.round(box.w*w)), bh = Math.max(1,Math.round(box.h*h));
+  if(m === "black"){
+    x.fillStyle = "#000"; x.fillRect(bx,by,bw,bh);
+  }else{
+    // pixelate-blur: shrink the region hard then scale it back
+    const t = document.createElement("canvas");
+    const k = Math.max(6, Math.round(bh/9));           // mosaic cell ≈ region/9
+    t.width = Math.max(1,Math.round(bw/k)); t.height = Math.max(1,Math.round(bh/k));
+    const tx = t.getContext("2d");
+    tx.drawImage(x.canvas, bx,by,bw,bh, 0,0,t.width,t.height);
+    x.save(); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high";
+    x.drawImage(t, 0,0,t.width,t.height, bx,by,bw,bh);
+    if("filter" in x){ x.filter = "blur(6px)"; x.drawImage(t,0,0,t.width,t.height,bx,by,bw,bh); x.filter = "none"; }
+    x.restore();
+  }
+}
+
+/* ---------- thumbnails ---------- */
+function renderThumbs(){
+  countEl.textContent = items.length ? items.length+" photo"+(items.length>1?"s":"") : "";
+  $("#saveAll").disabled = !items.length;
+  grid.innerHTML = "";
+  for(const it of items){
+    const cell = document.createElement("div"); cell.className = "cell";
+    const cv = process(it, 360, 360);
+    cv.style.width="100%"; cv.style.height="100%"; cv.style.objectFit="cover";
+    cell.appendChild(cv);
+    const rm = document.createElement("button"); rm.className="rm"; rm.textContent="×";
+    rm.onclick = e=>{e.stopPropagation(); removeItem(it.id);};
+    cell.appendChild(rm);
+    cell.onclick = ()=>openEditor(it.id);
+    grid.appendChild(cell);
+  }
+  $("#drop").classList.toggle("hidden", items.length>0);
+}
+function removeItem(id){
+  const i = items.findIndex(x=>x.id===id);
+  if(i>=0){ items.splice(i,1); renderThumbs(); }
+}
+
+/* ---------- add files ---------- */
+async function addFiles(list){
+  const fs = [...list].filter(f=>f.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif)$/i.test(f.name));
+  if(!fs.length) return toast("No images found");
+  showBusy("Loading photos…");
+  for(const f of fs){
+    try{
+      const {img,w,h,url} = await loadImage(f);
+      items.push({id:++seq, name:f.name||("photo-"+seq), file:f, img, w, h, url, box:newBox()});
+    }catch(e){ console.warn("skip", f.name, e); }
+  }
+  hideBusy(); renderThumbs();
+}
+$("#addBtn").onclick = ()=>file.click();
+$("#drop").onclick = ()=>file.click();
+file.onchange = ()=>{ addFiles(file.files); file.value=""; };
+["dragover","drop"].forEach(ev=>document.addEventListener(ev,e=>{
+  e.preventDefault();
+  if(ev==="drop") addFiles(e.dataTransfer.files);
+}));
+
+/* ---------- mode + box sliders ---------- */
+function setMode(m){
+  mode = m;
+  document.querySelectorAll("#modeSeg button, #edModeSeg button")
+    .forEach(b=>b.classList.toggle("on", b.dataset.m===m));
+  renderThumbs();
+}
+$("#modeSeg").onclick = e=>{ if(e.target.dataset.m) setMode(e.target.dataset.m); };
+$("#edModeSeg").onclick = e=>{ if(e.target.dataset.m){ setMode(e.target.dataset.m); if(cur) drawEditor(); } };
+$("#wRange").oninput = ()=>{ const v=+$("#wRange").value/100; items.forEach(i=>i.box.w=v); renderThumbs(); };
+$("#hRange").oninput = ()=>{ const v=+$("#hRange").value/100; items.forEach(i=>i.box.h=v); renderThumbs(); };
+
+/* ---------- editor ---------- */
+let cur = null, dScale = 1;
+const ed=$("#ed"), stage=$("#stage"), wrap=$("#imgwrap"), edC=$("#edCanvas"), mask=$("#mask");
+function openEditor(id){
+  cur = items.find(i=>i.id===id); if(!cur) return;
+  ed.classList.add("open"); drawEditor();
+}
+function drawEditor(){
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  dScale = Math.min(sw/cur.w, sh/cur.h, 1);
+  const cv = process(cur, cur.w*dScale, cur.h*dScale);
+  edC.width = cv.width; edC.height = cv.height;
+  edC.getContext("2d").drawImage(cv,0,0);
+  edC.style.width = cv.width+"px"; edC.style.height = cv.height+"px";
+  mask.classList.toggle("black", mode==="black");
+  placeMask();
+}
+function placeMask(){
+  const cw = edC.width, ch = edC.height, b = cur.box;
+  mask.style.left = (b.x*cw)+"px"; mask.style.top = (b.y*ch)+"px";
+  mask.style.width = (b.w*cw)+"px"; mask.style.height = (b.h*ch)+"px";
+}
+function syncBox(){
+  const cw = edC.width, ch = edC.height, b = cur.box;
+  b.x = clamp(parseFloat(mask.style.left)/cw, 0, 1-b.w);
+  b.y = clamp(parseFloat(mask.style.top)/ch, 0, 1-b.h);
+  b.w = clamp(parseFloat(mask.style.width)/cw, 0.02, 1);
+  b.h = clamp(parseFloat(mask.style.height)/ch, 0.02, 1);
+}
+const clamp = (v,a,b)=>Math.min(b,Math.max(a,v));
+let drag=null;
+mask.addEventListener("pointerdown", e=>{
+  e.preventDefault(); mask.setPointerCapture(e.pointerId);
+  const onHd = e.target.id==="hd";
+  drag = {onHd, sx:e.clientX, sy:e.clientY,
+    l:parseFloat(mask.style.left), t:parseFloat(mask.style.top),
+    w:parseFloat(mask.style.width), h:parseFloat(mask.style.height)};
+});
+mask.addEventListener("pointermove", e=>{
+  if(!drag) return;
+  const dx = e.clientX-drag.sx, dy = e.clientY-drag.sy, cw=edC.width, ch=edC.height;
+  if(drag.onHd){
+    mask.style.width  = clamp(drag.w+dx, cw*0.03, cw-drag.l)+"px";
+    mask.style.height = clamp(drag.h+dy, ch*0.03, ch-drag.t)+"px";
+  }else{
+    mask.style.left = clamp(drag.l+dx, 0, cw-drag.w)+"px";
+    mask.style.top  = clamp(drag.t+dy, 0, ch-drag.h)+"px";
+  }
+});
+mask.addEventListener("pointerup", ()=>{ if(drag){drag=null; syncBox(); drawEditor(); renderThumbs();} });
+$("#edBack").onclick = ()=>{ ed.classList.remove("open"); cur=null; renderThumbs(); };
+$("#applyAll").onclick = ()=>{
+  if(!cur) return;
+  items.forEach(i=>{ if(i!==cur) i.box = {...cur.box}; });
+  renderThumbs(); toast("Box applied to all photos");
+};
+$("#edSave").onclick = async ()=>{ if(cur){ await saveOne(cur); toast("Saved"); } };
+
+/* ---------- save ---------- */
+function extOf(name,type){
+  const m = /\.(\w+)$/.exec(name); if(m) return "."+m[1].toLowerCase();
+  return type==="image/png" ? ".png" : ".jpg";
+}
+function baseName(name){ return name.replace(/\.[^.]+$/,""); }
+async function blobOf(it){
+  const c = process(it);
+  const type = (it.file.type === "image/png") ? "image/png" : "image/jpeg";
+  return await new Promise(r=>c.toBlob(r,type,0.92));
+}
+async function saveOne(it){
+  const b = await blobOf(it);
+  const f = new File([b], baseName(it.name)+"-clean"+extOf(it.name,b.type), {type:b.type});
+  if(navigator.canShare && navigator.canShare({files:[f]})){
+    try{ await navigator.share({files:[f]}); return; }catch(e){ if(e.name==="AbortError") return; }
+  }
+  downloadBlob(b, f.name);
+}
+async function saveAll(){
+  if(!items.length) return;
+  showBusy("Processing photos…");
+  const files = [];
+  const sep = $("#sepToggle").checked;
+  let sepN = 0;
+  for(let i=0;i<items.length;i++){
+    const it = items[i];
+    const b = await blobOf(it);
+    files.push(new File([b], baseName(it.name)+"-clean"+extOf(it.name,b.type), {type:b.type}));
+    $("#busyTxt").textContent = "Processing "+(i+1)+" / "+items.length;
+    if(sep && (i+1)%5===0 && i<items.length-1){
+      files.push(await makeCardFile(++sepN));
+    }
+  }
+  hideBusy();
+  if(navigator.canShare && navigator.canShare({files})){
+    try{ await navigator.share({files}); toast("Done"); return; }
+    catch(e){ if(e.name==="AbortError") return; }
+  }
+  // fallback: zip them
+  showBusy("Making ZIP…");
+  const zip = await makeZip(files);
+  hideBusy();
+  downloadBlob(zip, "datecover-photos.zip");
+  toast("Saved as ZIP");
+}
+$("#saveAll").onclick = saveAll;
+
+function makeCardFile(n){
+  return new Promise(res=>{
+    const c = document.createElement("canvas"); c.width = 1200; c.height = 1200;
+    const x = c.getContext("2d");
+    const hue = Math.floor(Math.random()*360);
+    x.fillStyle = "hsl("+hue+",65%,45%)";
+    x.fillRect(0,0,1200,1200);
+    c.toBlob(b=>res(new File([b], "_card-"+String(n).padStart(2,"0")+".jpg", {type:"image/jpeg"})), "image/jpeg", 0.9);
+  });
+}
+
+function downloadBlob(blob, name){
+  const u = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href=u; a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(u), 4000);
+}
+
+/* ---------- minimal store-only ZIP ---------- */
+const crcT = (()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c;}return t;})();
+const crc32 = b=>{let c=~0;for(let i=0;i<b.length;i++)c=crcT[(c^b[i])&255]^(c>>>8);return ~c>>>0;};
+async function makeZip(files){
+  const enc = new TextEncoder(), parts=[], central=[]; let off=0;
+  for(const f of files){
+    const nm = enc.encode(f.name), data = new Uint8Array(await f.arrayBuffer()), crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint16(6,0,true);
+    lh.setUint16(8,0,true); lh.setUint16(10,0,true); lh.setUint16(12,0,true);
+    lh.setUint32(14,crc,true); lh.setUint32(18,data.length,true); lh.setUint32(22,data.length,true);
+    lh.setUint16(26,nm.length,true); lh.setUint16(28,0,true);
+    parts.push(lh.buffer, nm, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true); ch.setUint16(4,20,true); ch.setUint16(6,20,true);
+    ch.setUint16(8,0,true); ch.setUint16(10,0,true); ch.setUint16(12,0,true); ch.setUint16(14,0,true);
+    ch.setUint32(16,crc,true); ch.setUint32(20,data.length,true); ch.setUint32(24,data.length,true);
+    ch.setUint16(28,nm.length,true); ch.setUint32(42,off,true);
+    central.push(ch.buffer, nm);
+    off += 30 + nm.length + data.length;
+  }
+  let csz = 0; central.forEach(p=>csz+=p.byteLength);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0,0x06054b50,true); end.setUint16(8,files.length,true); end.setUint16(10,files.length,true);
+  end.setUint32(12,csz,true); end.setUint32(16,off,true);
+  return new Blob([...parts, ...central, end.buffer], {type:"application/zip"});
+}
+
+/* ---------- misc ---------- */
+function toast(m){ const t=$("#toast"); t.textContent=m; t.style.display="block";
+  clearTimeout(t._t); t._t=setTimeout(()=>t.style.display="none",2200); }
+function showBusy(m){ $("#busyTxt").textContent=m||"Working…"; $("#busy").style.display="flex"; }
+function hideBusy(){ $("#busy").style.display="none"; }
+
+/* PWA */
+if("serviceWorker" in navigator){
+  window.addEventListener("load", ()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
+}
+renderThumbs();
+</script>
+</body>
+</html>
