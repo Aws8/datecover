@@ -116,7 +116,9 @@
   .ed .bar{display:flex;gap:8px;padding:11px 13px calc(11px + var(--safe-b));background:rgba(16,19,24,.97);
     border-top:1px solid var(--line);align-items:center;flex-wrap:wrap}
   .ed .nav{position:absolute;top:calc(10px + env(safe-area-inset-top,0px));left:0;right:0;display:flex;
-    justify-content:space-between;padding:0 12px;pointer-events:none}
+    justify-content:space-between;padding:0 12px;pointer-events:none;z-index:5}
+  .ed .nav .navmid{display:flex;gap:8px;pointer-events:none}
+  .ed .nav .navmid button{font-size:18px;padding:7px 16px}
   .ed .nav button{pointer-events:auto;background:rgba(12,14,18,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
     border:1px solid var(--line2);color:#fff;border-radius:99px;padding:9px 15px;font-size:14px;font-weight:600}
   .ed .bar .btn{padding:9px 13px;font-size:13.5px}
@@ -137,7 +139,7 @@
 <body>
 <header>
   <h1>DateCover</h1>
-  <span class="ver" id="ver">v1.7</span>
+  <span class="ver" id="ver">v1.8</span>
   <span class="count" id="count"></span>
 </header>
 
@@ -171,6 +173,10 @@
 <div class="ed" id="ed">
   <div class="nav">
     <button id="edBack">‹ Back</button>
+    <div class="navmid">
+      <button id="edPrev">‹</button>
+      <button id="edNext">›</button>
+    </div>
     <button id="edSave">Save this one</button>
   </div>
   <div class="stage" id="stage">
@@ -203,7 +209,7 @@
 
 <script src="ocr/tesseract.min.js"></script>
 <script>
-const VERSION = "v1.7";
+const VERSION = "v1.8";
 "use strict";
 /* ---------- state ---------- */
 const items = [];            // {id,name,file,img,w,h,box:{x,y,w,h},proc}
@@ -308,19 +314,17 @@ async function loadImage(f){
 
 /* ---------- processing ---------- */
 function process(it, tw, th){
-  // draws it.img into a canvas of tw x th with the cover applied
+  // draws it.img with covers applied; when tw/th given, renders directly at that scale
   const w = it.w, h = it.h;
-  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const s = tw ? Math.min(tw/w, th/h, 1) : 1;
+  const cw = Math.max(1,Math.round(w*s)), ch = Math.max(1,Math.round(h*s));
+  const c = document.createElement("canvas"); c.width = cw; c.height = ch;
   const x = c.getContext("2d");
-  x.drawImage(it.img, 0, 0, w, h);
-  for(const b of it.boxes) applyCover(x, w, h, b, mode);
-  if(it.strokes) for(const st of it.strokes) applyStroke(x, w, h, st, mode);
-  if(!tw) return c;
-  const s = Math.min(tw/w, th/h, 1);
-  const o = document.createElement("canvas");
-  o.width = Math.max(1,Math.round(w*s)); o.height = Math.max(1,Math.round(h*s));
-  o.getContext("2d").drawImage(c,0,0,o.width,o.height);
-  return o;
+  x.imageSmoothingQuality = "high";
+  x.drawImage(it.img, 0, 0, cw, ch);
+  for(const b of it.boxes) applyCover(x, cw, ch, b, mode);
+  if(it.strokes) for(const st of it.strokes) applyStroke(x, cw, ch, st, mode);
+  return c;
 }
 function applyCover(x, w, h, box, m){
   const bx = Math.round(box.x*w), by = Math.round(box.y*h);
@@ -561,22 +565,127 @@ const clamp = (v,a,b)=>Math.min(b,Math.max(a,v));
 function openEditor(id){
   cur = items.find(i=>i.id===id); if(!cur) return;
   curSel = 0;
-  ed.classList.add("open"); drawEditor();
+  ed.classList.add("open"); resetZoom(); drawEditor();
 }
+function navEditor(dir){
+  const i = items.indexOf(cur);
+  const n = items[i+dir];
+  if(!n){ toast(dir>0 ? "Last photo" : "First photo"); return; }
+  cur = n; curSel = 0; resetZoom(); drawEditor();
+}
+$("#edPrev").onclick = ()=>navEditor(-1);
+$("#edNext").onclick = ()=>navEditor(1);
+let dispW = 0, dispH = 0;
 function drawEditor(){
+  const dpr = Math.min(window.devicePixelRatio||1, 2.5);
   const sw = stage.clientWidth, sh = stage.clientHeight;
   dScale = Math.min(sw/cur.w, sh/cur.h, 1);
-  const cv = process(cur, cur.w*dScale, cur.h*dScale);
+  dispW = Math.max(1,Math.round(cur.w*dScale));
+  dispH = Math.max(1,Math.round(cur.h*dScale));
+  const cv = process(cur, Math.round(dispW*dpr), Math.round(dispH*dpr));
   edC.width = cv.width; edC.height = cv.height;
   edC.getContext("2d").drawImage(cv,0,0);
-  edC.style.width = cv.width+"px"; edC.style.height = cv.height+"px";
+  edC.style.width = dispW+"px"; edC.style.height = dispH+"px";
   sizeBrushLayer();
   bl.classList.toggle("active", tool==="brush");
   renderMasks();
+  $("#edPrev").style.opacity = items.indexOf(cur)>0 ? 1 : .35;
+  $("#edNext").style.opacity = items.indexOf(cur)<items.length-1 ? 1 : .35;
 }
+/* ---------- zoom & pan ---------- */
+let zoomS = 1, zoomX = 0, zoomY = 0;
+function applyZoom(){
+  wrap.style.transformOrigin = "0 0";
+  wrap.style.transform = `translate(${zoomX}px,${zoomY}px) scale(${zoomS})`;
+}
+function resetZoom(){ zoomS = 1; zoomX = 0; zoomY = 0; applyZoom(); }
+function clampPan(){
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  const lw = (sw - dispW)/2, lt = (sh - dispH)/2;
+  const vw = dispW*zoomS, vh = dispH*zoomS;
+  if(vw >= sw) zoomX = clamp(zoomX, sw - vw - lw, -lw);
+  else zoomX = clamp(zoomX, -lw - (sw-vw)/2, -lw + (sw-vw)/2);
+  if(vh >= sh) zoomY = clamp(zoomY, sh - vh - lt, -lt);
+  else zoomY = clamp(zoomY, -lt - (sh-vh)/2, -lt + (sh-vh)/2);
+}
+function zoomTo(ns, cx, cy){
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  const lw = (sw - dispW)/2, lt = (sh - dispH)/2;
+  ns = clamp(ns, 1, 6);
+  const px = (cx - lw - zoomX)/zoomS, py = (cy - lt - zoomY)/zoomS;
+  zoomS = ns;
+  zoomX = cx - lw - px*ns;
+  zoomY = cy - lt - py*ns;
+  clampPan(); applyZoom();
+}
+const edPointers = new Map();
+let pinch = null, panDrag = null, swipeTrk = null;
+stage.addEventListener("pointerdown", e=>{
+  edPointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(edPointers.size===2){
+    if(bstroke){ bstroke = null; blx.clearRect(0,0,bl.width,bl.height); }
+    const [a,b2] = [...edPointers.values()];
+    pinch = {d:Math.hypot(a.x-b2.x,a.y-b2.y), s:zoomS};
+    panDrag = null; swipeTrk = null;
+  }else if(edPointers.size===1){
+    if(e.target===stage){
+      swipeTrk = {x:e.clientX, y:e.clientY};
+    }else if((e.target===edC || e.target===bl) && zoomS>1 && tool!=="brush"){
+      panDrag = {sx:e.clientX, sy:e.clientY, zx:zoomX, zy:zoomY};
+    }else if((e.target===edC) && zoomS>1 && tool==="brush"){
+      // in brush mode single finger brushes; no pan
+    }
+  }
+});
+stage.addEventListener("pointermove", e=>{
+  if(!edPointers.has(e.pointerId)) return;
+  edPointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(pinch && edPointers.size===2){
+    const [a,b2] = [...edPointers.values()];
+    const nd = Math.hypot(a.x-b2.x,a.y-b2.y);
+    if(pinch.d>0){
+      const r = stage.getBoundingClientRect();
+      const cx = (a.x+b2.x)/2 - r.left, cy = (a.y+b2.y)/2 - r.top;
+      zoomTo(pinch.s * nd/pinch.d, cx, cy);
+    }
+  }else if(panDrag){
+    zoomX = panDrag.zx + (e.clientX - panDrag.sx);
+    zoomY = panDrag.zy + (e.clientY - panDrag.sy);
+    clampPan(); applyZoom();
+  }
+});
+stage.addEventListener("pointerup", e=>{
+  const wasPinch = edPointers.size===2;
+  edPointers.delete(e.pointerId);
+  if(edPointers.size<2) pinch = null;
+  if(edPointers.size===0){
+    if(swipeTrk && zoomS===1){
+      const dx = e.clientX - swipeTrk.x, dy = e.clientY - swipeTrk.y;
+      if(Math.abs(dx)>60 && Math.abs(dx)>Math.abs(dy)*1.5) navEditor(dx<0?1:-1);
+    }
+    // double-tap zoom
+    if(!wasPinch && e.target!==stage){
+      const now = Date.now();
+      const r = stage.getBoundingClientRect();
+      if(now - lastTapT < 320 && Math.hypot(e.clientX-lastTapX, e.clientY-lastTapY) < 40){
+        if(zoomS>1.2) resetZoom();
+        else zoomTo(2.6, e.clientX - r.left, e.clientY - r.top);
+        lastTapT = 0;
+      }else lastTapT = now;
+      lastTapX = e.clientX; lastTapY = e.clientY;
+    }
+    panDrag = null; swipeTrk = null;
+  }
+});
+stage.addEventListener("pointercancel", e=>{
+  edPointers.delete(e.pointerId);
+  if(edPointers.size<2) pinch = null;
+  if(edPointers.size===0){ panDrag = null; swipeTrk = null; }
+});
+let lastTapT = 0, lastTapX = 0, lastTapY = 0;
 function renderMasks(){
   wrap.querySelectorAll(".mask").forEach(m=>m.remove());
-  const cw = edC.width, ch = edC.height;
+  const cw = dispW || edC.width, ch = dispH || edC.height;
   cur.boxes.forEach((b, idx)=>{
     const m = document.createElement("div");
     m.className = "mask"+(idx===curSel?" sel":"")+(mode==="black"?" black":"");
@@ -597,7 +706,7 @@ function renderMasks(){
     });
     m.addEventListener("pointermove", e=>{
       if(!drag) return;
-      const dx = e.clientX-drag.sx, dy = e.clientY-drag.sy;
+      const dx = (e.clientX-drag.sx)/zoomS, dy = (e.clientY-drag.sy)/zoomS;
       if(drag.onHd){
         m.style.width  = clamp(drag.w+dx, cw*0.03, cw-drag.l)+"px";
         m.style.height = clamp(drag.h+dy, ch*0.03, ch-drag.t)+"px";
@@ -689,9 +798,9 @@ function extOf(name,type){
 }
 function baseName(name){ return name.replace(/\.[^.]+$/,""); }
 async function blobOf(it){
+  if(it.ocrJob) await it.ocrJob;
   const c = process(it);
   const type = (it.file.type === "image/png") ? "image/png" : "image/jpeg";
-  if(it.ocrJob) await it.ocrJob;
   return await new Promise(r=>c.toBlob(r,type,1.0));
 }
 async function saveOne(it){

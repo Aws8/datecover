@@ -1,4 +1,4 @@
-const CACHE = "datecover-v17";
+const CACHE = "datecover-v18";
 const ASSETS = [
   "./",
   "index.html",
