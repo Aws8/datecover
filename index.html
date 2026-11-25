@@ -110,6 +110,10 @@
   .ed .bar button:disabled{opacity:.35}
   .mask .hd{position:absolute;width:34px;height:34px;right:-17px;bottom:-17px;border-radius:50%;
     background:var(--acc);border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.5);touch-action:none}
+  .imgwrap.slideR{animation:slideR .28s var(--ease)}
+  .imgwrap.slideL{animation:slideL .28s var(--ease)}
+  @keyframes slideR{from{opacity:0;transform:translateX(60px)}}
+  @keyframes slideL{from{opacity:0;transform:translateX(-60px)}}
   #brushLayer{position:absolute;left:0;top:0;touch-action:none;pointer-events:none}
   #brushLayer.active{pointer-events:auto}
   #toolSeg button{padding:8px 13px;font-size:12.5px}
@@ -139,7 +143,7 @@
 <body>
 <header>
   <h1>DateCover</h1>
-  <span class="ver" id="ver">v1.9.1</span>
+  <span class="ver" id="ver">v1.9.2</span>
   <span class="count" id="count"></span>
 </header>
 
@@ -211,7 +215,7 @@
 
 <script src="ocr/tesseract.min.js"></script>
 <script>
-const VERSION = "v1.9.1";
+const VERSION = "v1.9.2";
 "use strict";
 /* ---------- state ---------- */
 const items = [];            // {id,name,file,img,w,h,box:{x,y,w,h},proc}
@@ -578,6 +582,9 @@ function navEditor(dir){
   const n = items[i+dir];
   if(!n){ toast(dir>0 ? "Last photo" : "First photo"); return; }
   cur = n; curSel = 0; resetZoom(); drawEditor();
+  wrap.classList.remove("slideL","slideR");
+  void wrap.offsetWidth;
+  wrap.classList.add(dir>0 ? "slideR" : "slideL");
 }
 $("#edPrev").onclick = ()=>navEditor(-1);
 $("#edNext").onclick = ()=>navEditor(1);
@@ -768,12 +775,12 @@ bl.addEventListener("pointerdown", e=>{
   if(tool!=="brush" || !cur) return;
   e.preventDefault(); bl.setPointerCapture(e.pointerId);
   const r = bl.getBoundingClientRect();
-  bstroke = {pts:[[ (e.clientX-r.left)/bl.width, (e.clientY-r.top)/bl.height ]], size:brushSize};
+  bstroke = {pts:[[ (e.clientX-r.left)/r.width, (e.clientY-r.top)/r.height ]], size:brushSize};
 });
 bl.addEventListener("pointermove", e=>{
   if(!bstroke) return;
   const r = bl.getBoundingClientRect();
-  bstroke.pts.push([ (e.clientX-r.left)/bl.width, (e.clientY-r.top)/bl.height ]);
+  bstroke.pts.push([ (e.clientX-r.left)/r.width, (e.clientY-r.top)/r.height ]);
   blx.clearRect(0,0,bl.width,bl.height);
   strokePath(blx, bstroke.pts.map(p=>[p[0]*bl.width,p[1]*bl.height]), brushSize*Math.min(bl.width,bl.height),
     mode==="black" ? "rgba(0,0,0,.9)" : "rgba(79,140,255,.65)");
