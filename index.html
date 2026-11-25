@@ -123,6 +123,12 @@
     justify-content:space-between;padding:0 12px;pointer-events:none;z-index:5}
   .ed .nav .navmid{display:flex;gap:8px;pointer-events:none}
   .ed .nav .navmid button{font-size:18px;padding:7px 16px}
+
+  .ed .strip{position:absolute;inset:0;will-change:transform;z-index:1}
+  .ed .vslot{position:absolute;top:0;bottom:0;left:0;width:100%;display:flex;align-items:center;justify-content:center;line-height:0}
+  .ed .vslot.prev{left:calc(-100% - 24px)}
+  .ed .vslot.next{left:calc(100% + 24px)}
+  .ed .vslot canvas{display:block;border-radius:2px}
   .ed .nav button{pointer-events:auto;background:rgba(12,14,18,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
     border:1px solid var(--line2);color:#fff;border-radius:99px;padding:9px 15px;font-size:14px;font-weight:600}
   .ed .bar .btn{padding:9px 13px;font-size:13.5px}
@@ -143,7 +149,7 @@
 <body>
 <header>
   <h1>DateCover</h1>
-  <span class="ver" id="ver" style="cursor:pointer">v1.9.4</span>
+  <span class="ver" id="ver" style="cursor:pointer">v1.9.5</span>
   <span class="count" id="count"></span>
 </header>
 
@@ -186,9 +192,15 @@
     <button id="edSave">Save this one</button>
   </div>
   <div class="stage" id="stage">
-    <div class="imgwrap" id="imgwrap">
-      <canvas id="edCanvas"></canvas>
-      <canvas id="brushLayer"></canvas>
+    <div class="strip" id="strip">
+      <div class="vslot prev" id="slotPrev"></div>
+      <div class="vslot" id="slotCur">
+        <div class="imgwrap" id="imgwrap">
+          <canvas id="edCanvas"></canvas>
+          <canvas id="brushLayer"></canvas>
+        </div>
+      </div>
+      <div class="vslot next" id="slotNext"></div>
     </div>
   </div>
   <div class="bar">
@@ -215,7 +227,7 @@
 
 <script src="ocr/tesseract.min.js"></script>
 <script>
-const VERSION = "v1.9.4";
+const VERSION = "v1.9.5";
 "use strict";
 /* ---------- state ---------- */
 const items = [];            // {id,name,file,img,w,h,box:{x,y,w,h},proc}
@@ -581,10 +593,9 @@ function navEditor(dir){
   const i = items.indexOf(cur);
   const n = items[i+dir];
   if(!n){ toast(dir>0 ? "Last photo" : "First photo"); return; }
-  cur = n; curSel = 0; resetZoom(); drawEditor();
-  wrap.classList.remove("slideL","slideR");
-  void wrap.offsetWidth;
-  wrap.classList.add(dir>0 ? "slideR" : "slideL");
+  if(stripAnim) finishStripAnim();
+  setStrip(-dir*stripW(), true);
+  stripAnim = {dir, t:setTimeout(finishStripAnim, 270)};
 }
 $("#edPrev").onclick = ()=>navEditor(-1);
 $("#edNext").onclick = ()=>navEditor(1);
@@ -604,7 +615,45 @@ function drawEditor(){
   renderMasks();
   $("#edPrev").style.opacity = items.indexOf(cur)>0 ? 1 : .35;
   $("#edNext").style.opacity = items.indexOf(cur)<items.length-1 ? 1 : .35;
+  setStrip(0, false);
+  renderSlots();
 }
+
+/* ---------- iOS-style finger-follow swipe strip ---------- */
+const strip = $("#strip");
+const GAPX = 24;
+let stripAnim = null;
+function stripW(){ return stage.clientWidth + GAPX; }
+function setStrip(dx, animate){
+  strip.style.transition = animate ? "transform .24s var(--ease)" : "none";
+  strip.style.transform = "translateX(" + dx + "px)";
+}
+function renderSlots(){
+  const i = items.indexOf(cur);
+  [["slotPrev", items[i-1]], ["slotNext", items[i+1]]].forEach(([id, it])=>{
+    const slot = document.getElementById(id);
+    slot.innerHTML = "";
+    if(!it) return;
+    const sw = stage.clientWidth, sh = stage.clientHeight;
+    const sc = Math.min(sw/it.w, sh/it.h, 1);
+    const w = Math.max(1,Math.round(it.w*sc)), h = Math.max(1,Math.round(it.h*sc));
+    const cv = process(it, w, h);
+    cv.style.width = w+"px"; cv.style.height = h+"px";
+    slot.appendChild(cv);
+  });
+}
+function finishStripAnim(){
+  if(!stripAnim) return;
+  clearTimeout(stripAnim.t);
+  const dir = stripAnim.dir;
+  stripAnim = null;
+  if(dir !== 0){
+    const i = items.indexOf(cur);
+    if(items[i+dir]){ cur = items[i+dir]; curSel = 0; resetZoom(); }
+  }
+  drawEditor();
+}
+
 /* ---------- zoom & pan ---------- */
 let zoomS = 1, zoomX = 0, zoomY = 0;
 function applyZoom(){
@@ -639,14 +688,15 @@ stage.addEventListener("pointerdown", e=>{
     if(bstroke){ bstroke = null; blx.clearRect(0,0,bl.width,bl.height); }
     const [a,b2] = [...edPointers.values()];
     pinch = {d:Math.hypot(a.x-b2.x,a.y-b2.y), s:zoomS};
-    panDrag = null; swipeTrk = null;
+    panDrag = null;
+    if(swipeTrk && swipeTrk.active) setStrip(0, true);
+    swipeTrk = null;
   }else if(edPointers.size===1){
-    if(e.target===stage){
-      swipeTrk = {x:e.clientX, y:e.clientY};
+    const canSwipe = zoomS===1 && !stripAnim && (e.target===stage || e.target===edC) && (tool!=="brush" || e.target===stage);
+    if(canSwipe){
+      swipeTrk = {x:e.clientX, y:e.clientY, active:false, dx:0, vx:0, lx:e.clientX, lt:Date.now(), can:true};
     }else if((e.target===edC || e.target===bl) && zoomS>1 && tool!=="brush"){
       panDrag = {sx:e.clientX, sy:e.clientY, zx:zoomX, zy:zoomY};
-    }else if((e.target===edC) && zoomS>1 && tool==="brush"){
-      // in brush mode single finger brushes; no pan
     }
   }
 });
@@ -665,6 +715,22 @@ stage.addEventListener("pointermove", e=>{
     zoomX = panDrag.zx + (e.clientX - panDrag.sx);
     zoomY = panDrag.zy + (e.clientY - panDrag.sy);
     clampPan(); applyZoom();
+  }else if(swipeTrk && edPointers.size===1){
+    const dx = e.clientX - swipeTrk.x, dy = e.clientY - swipeTrk.y;
+    if(!swipeTrk.active){
+      if(Math.abs(dx)>12 && Math.abs(dx)>Math.abs(dy)*1.2) swipeTrk.active = true;
+      else if(Math.abs(dy)>16) swipeTrk.can = false;
+    }
+    if(swipeTrk.active && swipeTrk.can){
+      const i = items.indexOf(cur);
+      let d = dx;
+      if((d>0 && i===0) || (d<0 && i===items.length-1)) d = d*0.3;
+      setStrip(d, false);
+      swipeTrk.dx = d;
+      const now = Date.now();
+      swipeTrk.vx = swipeTrk.vx*0.6 + ((e.clientX - swipeTrk.lx)/Math.max(8, now - swipeTrk.lt))*0.4;
+      swipeTrk.lx = e.clientX; swipeTrk.lt = now;
+    }
   }
 });
 stage.addEventListener("pointerup", e=>{
@@ -672,9 +738,19 @@ stage.addEventListener("pointerup", e=>{
   edPointers.delete(e.pointerId);
   if(edPointers.size<2) pinch = null;
   if(edPointers.size===0){
-    if(swipeTrk && zoomS===1){
-      const dx = e.clientX - swipeTrk.x, dy = e.clientY - swipeTrk.y;
-      if(Math.abs(dx)>60 && Math.abs(dx)>Math.abs(dy)*1.5) navEditor(dx<0?1:-1);
+    if(swipeTrk && swipeTrk.active && swipeTrk.can){
+      const i = items.indexOf(cur);
+      const W = stripW();
+      const goNext = (swipeTrk.dx < -W*0.2 || swipeTrk.vx < -0.4) && i < items.length-1;
+      const goPrev = (swipeTrk.dx > W*0.2 || swipeTrk.vx > 0.4) && i > 0;
+      if(goNext || goPrev){
+        const dir = goNext ? 1 : -1;
+        setStrip(-dir*W, true);
+        stripAnim = {dir, t:setTimeout(finishStripAnim, 260)};
+      }else{
+        setStrip(0, true);
+        stripAnim = {dir:0, t:setTimeout(finishStripAnim, 260)};
+      }
     }
     // double-tap zoom
     if(!wasPinch && e.target!==stage){
