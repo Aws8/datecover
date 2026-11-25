@@ -100,7 +100,7 @@
 <body>
 <header>
   <h1>DateCover</h1>
-  <span class="ver" id="ver">v1.5</span>
+  <span class="ver" id="ver">v1.6</span>
   <span class="count" id="count"></span>
 </header>
 
@@ -149,6 +149,8 @@
     <button class="btn" id="addBox">+ Box</button>
     <button class="btn ghost" id="delBox">Delete box</button>
     <button class="btn ghost" id="undoBrush">Undo</button>
+    <label style="font-size:12px;color:var(--mut);display:flex;align-items:center;gap:4px">Size
+      <input type="range" id="brushRange" min="2" max="12" value="5" style="width:80px"></label>
     <button class="btn ghost" id="applyAll">Same box for all</button>
     <div class="seg" id="edModeSeg">
       <button data-m="blur" class="on">Blur</button>
@@ -163,7 +165,7 @@
 
 <script src="ocr/tesseract.min.js"></script>
 <script>
-const VERSION = "v1.5";
+const VERSION = "v1.6";
 "use strict";
 /* ---------- state ---------- */
 const items = [];            // {id,name,file,img,w,h,box:{x,y,w,h},proc}
@@ -595,6 +597,7 @@ $("#edBack").onclick = ()=>{ ed.classList.remove("open"); cur=null; renderThumbs
 
 /* ---------- brush tool ---------- */
 let tool = "box", brushSize = 0.05;
+$("#brushRange").oninput = ()=>{ brushSize = +$("#brushRange").value/100; };
 const bl = $("#brushLayer"), blx = bl.getContext("2d");
 $("#toolSeg").onclick = e=>{
   if(!e.target.dataset.t) return;
