@@ -30,6 +30,8 @@
     padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;border-bottom:1px solid var(--line);background:var(--panel)}
   header h1{font-size:17px;margin:0;font-weight:650;letter-spacing:.2px}
   header .count{font-size:13px;color:var(--mut)}
+  header .ver{font-size:11px;color:var(--mut);margin-left:auto;margin-right:10px}
+  header .count{margin-left:0}
   main{flex:1;overflow-y:auto;padding:14px;-webkit-overflow-scrolling:touch}
   .drop{border:1.5px dashed var(--line);border-radius:14px;padding:34px 16px;text-align:center;color:var(--mut);
     background:var(--panel);font-size:15px;line-height:1.5}
@@ -72,6 +74,9 @@
   .ed .imgwrap canvas{max-width:100%;display:block}
   .mask{position:absolute;border:1.5px solid var(--acc);background:rgba(79,140,255,.18);border-radius:2px}
   .mask.black{background:rgba(0,0,0,.85);border-color:#666}
+  .mask:not(.sel){opacity:.55}
+  .mask.sel{border-width:2.5px;opacity:1}
+  .ed .bar button:disabled{opacity:.4}
   .mask .hd{position:absolute;width:34px;height:34px;right:-18px;bottom:-18px;border-radius:50%;
     background:var(--acc);border:2px solid #fff;touch-action:none}
   .ed .bar{display:flex;gap:8px;padding:10px 14px calc(10px + var(--safe-b));background:var(--panel);
@@ -91,6 +96,7 @@
 <body>
 <header>
   <h1>DateCover</h1>
+  <span class="ver" id="ver">v1.4</span>
   <span class="count" id="count"></span>
 </header>
 
@@ -128,10 +134,11 @@
   <div class="stage" id="stage">
     <div class="imgwrap" id="imgwrap">
       <canvas id="edCanvas"></canvas>
-      <div class="mask" id="mask"><div class="hd" id="hd"></div></div>
     </div>
   </div>
   <div class="bar">
+    <button class="btn" id="addBox">+ Box</button>
+    <button class="btn ghost" id="delBox">Delete box</button>
     <button class="btn ghost" id="applyAll">Same box for all</button>
     <div class="seg" id="edModeSeg">
       <button data-m="blur" class="on">Blur</button>
@@ -144,7 +151,9 @@
 <div class="toast" id="toast"></div>
 <input type="file" id="file" accept="image/*" multiple hidden>
 
+<script src="ocr/tesseract.min.js"></script>
 <script>
+const VERSION = "v1.4";
 "use strict";
 /* ---------- state ---------- */
 const items = [];            // {id,name,file,img,w,h,box:{x,y,w,h},proc}
@@ -254,7 +263,7 @@ function process(it, tw, th){
   const c = document.createElement("canvas"); c.width = w; c.height = h;
   const x = c.getContext("2d");
   x.drawImage(it.img, 0, 0, w, h);
-  applyCover(x, w, h, it.box, mode);
+  for(const b of it.boxes) applyCover(x, w, h, b, mode);
   if(!tw) return c;
   const s = Math.min(tw/w, th/h, 1);
   const o = document.createElement("canvas");
@@ -312,10 +321,124 @@ async function addFiles(list){
   for(const f of fs){
     try{
       const {img,w,h,url} = await loadImage(f);
-      items.push({id:++seq, name:f.name||("photo-"+seq), file:f, img, w, h, url, box:detectStamp(img,w,h)||newBox()});
+      const it = {id:++seq, name:f.name||("photo-"+seq), file:f, img, w, h, url, boxes:[detectStamp(img,w,h)||newBox()], ocrCount:0};
+      items.push(it);
+      it.ocrJob = ocrDates(it).then(boxes=>{ it.boxes.push(...boxes); it.ocrCount = boxes.length; it.ocrJob = null; renderThumbs(); })
+        .catch(e=>{ console.warn("ocr", e); it.ocrJob = null; });
     }catch(e){ console.warn("skip", f.name, e); }
   }
   hideBusy(); renderThumbs();
+}
+
+/* ---------- OCR date detection ---------- */
+const MONTH = /(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i;
+function isDateToken(s0){
+  const s = s0.replace(/^[^\w]+|[^\w)]+$/g,"");
+  if(!s) return false;
+  if(/\d/.test(s) && MONTH.test(s)) return true;                      // 24,Nov,2026 / Nov2026
+  if(/^\(?\d{1,2}[,\.\/\\-]\d{1,2}[,\.\/\\-]\d{2,4}\)?\.?$/.test(s)) return true; // 24/11/2026
+  if(/^\d{4}[-\/.]\d{1,2}[-\/.]\d{1,2}$/.test(s)) return true;          // 2026-11-24
+  return false;
+}
+function isMonthToken(s){ return /^[A-Za-z]{3,9}\.?,?$/.test(s) && MONTH.test(s); }
+function isNumToken(s){ return /^\(?\d{1,4}\)?[,.]?$/.test(s); }
+async function ocrDates(it){
+  if(typeof Tesseract === "undefined") return [];
+  const sc = Math.min(1, 1600/Math.max(it.w, it.h));
+  const ow = Math.max(8,Math.round(it.w*sc)), oh = Math.max(8,Math.round(it.h*sc));
+  const c = document.createElement("canvas"); c.width = ow; c.height = oh;
+  c.getContext("2d").drawImage(it.img, 0, 0, ow, oh);
+  const ob = new URL("ocr/", location.href).href;
+  const res = await Tesseract.recognize(c, "eng", {
+    workerPath: ob + "worker.min.js",
+    corePath: ob + "tesseract-core-simd-lstm.wasm.js",
+    langPath: ob.replace(/\/$/, ""),
+    gzip: false,
+    cacheMethod: "none",
+    workerBlobIO: false
+  });
+  const words = (res && res.data && res.data.words) || [];
+  const good = words.filter(wd => wd.confidence > 30 && wd.text && wd.text.trim().length > 0);
+  // group words into lines by vertical overlap
+  const lines = [];
+  for(const wd of good.sort((a,b)=>a.bbox.y0-b.bbox.y0 || a.bbox.x0-b.bbox.x0)){
+    const cy = (wd.bbox.y0+wd.bbox.y1)/2, hh = wd.bbox.y1-wd.bbox.y0;
+    let line = lines.find(L => Math.abs(L.cy-cy) < Math.max(hh,L.hh)*0.6);
+    if(!line){ line = {cy, hh, ws:[]}; lines.push(line); }
+    line.ws.push(wd);
+    line.cy = (line.cy* (line.ws.length-1) + cy)/line.ws.length;
+    line.hh = Math.max(line.hh, hh);
+  }
+  const out = [];
+  for(const L of lines){
+    L.ws.sort((a,b)=>a.bbox.x0-b.bbox.x0);
+    const mark = new Set();
+    L.ws.forEach((wd,i)=>{
+      const t = wd.text.trim();
+      if(isDateToken(t)){
+        mark.add(i);
+        // swallow adjacent numeric/month tokens that belong to the same date
+        for(const j of [i-1,i+1]){
+          const n = L.ws[j];
+          if(n && (isNumToken(n.text.trim()) || isMonthToken(n.text.trim())) &&
+             Math.abs((j<i? n.bbox.x1-wd.bbox.x0 : wd.bbox.x1-n.bbox.x0)) < L.hh*3){
+            // gap small enough
+            const gap = j<i ? wd.bbox.x0-n.bbox.x1 : n.bbox.x0-wd.bbox.x1;
+            if(gap < L.hh*2.5) mark.add(j);
+          }
+        }
+      }
+    });
+    // month-name tokens with a numeric neighbor (covers "24 Nov 2026" split in 3 words)
+    L.ws.forEach((wd,i)=>{
+      if(!isMonthToken(wd.text.trim())) return;
+      const near = [i-1,i+1].some(j=>{
+        const n = L.ws[j];
+        if(!n || !isNumToken(n.text.trim())) return false;
+        const gap = j<i ? wd.bbox.x0-n.bbox.x1 : n.bbox.x0-wd.bbox.x1;
+        return gap < L.hh*2.5;
+      });
+      if(near){
+        mark.add(i);
+        for(const j of [i-2,i-1,i+1,i+2]){
+          const n = L.ws[j];
+          if(n && isNumToken(n.text.trim())){
+            const gap = j<i ? wd.bbox.x0-n.bbox.x1 : n.bbox.x0-wd.bbox.x1;
+            if(gap < L.hh*4) mark.add(j);
+          }
+        }
+      }
+    });
+    if(!mark.size) continue;
+    // merge consecutive marked words into boxes
+    const idxs = [...mark].sort((a,b)=>a-b);
+    let grp = [idxs[0]];
+    const flush = ()=>{
+      let x0=1e9,y0=1e9,x1=-1,y1=-1;
+      for(const i of grp){ const b=L.ws[i].bbox; x0=Math.min(x0,b.x0); y0=Math.min(y0,b.y0); x1=Math.max(x1,b.x1); y1=Math.max(y1,b.y1); }
+      const padX = (y1-y0)*0.6, padY = (y1-y0)*0.35;
+      out.push({
+        x: Math.max(0,(x0-padX)/ow),
+        y: Math.max(0,(y0-padY)/oh),
+        w: Math.min(1, (x1+padX)/ow) - Math.max(0,(x0-padX)/ow),
+        h: Math.min(1, (y1+padY)/oh) - Math.max(0,(y0-padY)/oh)
+      });
+      grp = [];
+    };
+    for(let k=1;k<idxs.length;k++){
+      const prev = L.ws[idxs[k-1]], curW = L.ws[idxs[k]];
+      if(idxs[k]===idxs[k-1]+1 && curW.bbox.x0-prev.bbox.x1 < L.hh*3){ grp.push(idxs[k]); }
+      else { flush(); grp.push(idxs[k]); }
+    }
+    if(grp.length) flush();
+  }
+  // drop boxes that overlap the main stamp box (already covered)
+  return out.filter(b=>{
+    const m = it.boxes[0];
+    const ox = Math.max(0, Math.min(b.x+b.w, m.x+m.w) - Math.max(b.x, m.x));
+    const oy = Math.max(0, Math.min(b.y+b.h, m.y+m.h) - Math.max(b.y, m.y));
+    return ox*oy < b.w*b.h*0.6;
+  });
 }
 $("#addBtn").onclick = ()=>file.click();
 $("#drop").onclick = ()=>file.click();
@@ -334,14 +457,16 @@ function setMode(m){
 }
 $("#modeSeg").onclick = e=>{ if(e.target.dataset.m) setMode(e.target.dataset.m); };
 $("#edModeSeg").onclick = e=>{ if(e.target.dataset.m){ setMode(e.target.dataset.m); if(cur) drawEditor(); } };
-$("#wRange").oninput = ()=>{ const v=+$("#wRange").value/100; items.forEach(i=>i.box.w=v); renderThumbs(); };
-$("#hRange").oninput = ()=>{ const v=+$("#hRange").value/100; items.forEach(i=>i.box.h=v); renderThumbs(); };
+$("#wRange").oninput = ()=>{ const v=+$("#wRange").value/100; items.forEach(i=>i.boxes[0].w=v); renderThumbs(); };
+$("#hRange").oninput = ()=>{ const v=+$("#hRange").value/100; items.forEach(i=>i.boxes[0].h=v); renderThumbs(); };
 
 /* ---------- editor ---------- */
-let cur = null, dScale = 1;
-const ed=$("#ed"), stage=$("#stage"), wrap=$("#imgwrap"), edC=$("#edCanvas"), mask=$("#mask");
+let cur = null, dScale = 1, curSel = 0;
+const ed=$("#ed"), stage=$("#stage"), wrap=$("#imgwrap"), edC=$("#edCanvas");
+const clamp = (v,a,b)=>Math.min(b,Math.max(a,v));
 function openEditor(id){
   cur = items.find(i=>i.id===id); if(!cur) return;
+  curSel = 0;
   ed.classList.add("open"); drawEditor();
 }
 function drawEditor(){
@@ -351,47 +476,69 @@ function drawEditor(){
   edC.width = cv.width; edC.height = cv.height;
   edC.getContext("2d").drawImage(cv,0,0);
   edC.style.width = cv.width+"px"; edC.style.height = cv.height+"px";
-  mask.classList.toggle("black", mode==="black");
-  placeMask();
+  renderMasks();
 }
-function placeMask(){
-  const cw = edC.width, ch = edC.height, b = cur.box;
-  mask.style.left = (b.x*cw)+"px"; mask.style.top = (b.y*ch)+"px";
-  mask.style.width = (b.w*cw)+"px"; mask.style.height = (b.h*ch)+"px";
+function renderMasks(){
+  wrap.querySelectorAll(".mask").forEach(m=>m.remove());
+  const cw = edC.width, ch = edC.height;
+  cur.boxes.forEach((b, idx)=>{
+    const m = document.createElement("div");
+    m.className = "mask"+(idx===curSel?" sel":"")+(mode==="black"?" black":"");
+    const hd = document.createElement("div"); hd.className="hd"; m.appendChild(hd);
+    m.style.left = (b.x*cw)+"px"; m.style.top = (b.y*ch)+"px";
+    m.style.width = (b.w*cw)+"px"; m.style.height = (b.h*ch)+"px";
+    let drag = null;
+    m.addEventListener("pointerdown", e=>{
+      e.preventDefault(); e.stopPropagation();
+      curSel = idx;
+      wrap.querySelectorAll(".mask").forEach((mm,i)=>mm.classList.toggle("sel", i===idx));
+      m.setPointerCapture(e.pointerId);
+      const onHd = e.target===hd;
+      drag = {onHd, sx:e.clientX, sy:e.clientY,
+        l:parseFloat(m.style.left), t:parseFloat(m.style.top),
+        w:parseFloat(m.style.width), h:parseFloat(m.style.height)};
+    });
+    m.addEventListener("pointermove", e=>{
+      if(!drag) return;
+      const dx = e.clientX-drag.sx, dy = e.clientY-drag.sy;
+      if(drag.onHd){
+        m.style.width  = clamp(drag.w+dx, cw*0.03, cw-drag.l)+"px";
+        m.style.height = clamp(drag.h+dy, ch*0.03, ch-drag.t)+"px";
+      }else{
+        m.style.left = clamp(drag.l+dx, 0, cw-drag.w)+"px";
+        m.style.top  = clamp(drag.t+dy, 0, ch-drag.h)+"px";
+      }
+    });
+    m.addEventListener("pointerup", ()=>{
+      if(!drag) return;
+      drag = null;
+      b.x = clamp(parseFloat(m.style.left)/cw, 0, 1-b.w);
+      b.y = clamp(parseFloat(m.style.top)/ch, 0, 1-b.h);
+      b.w = clamp(parseFloat(m.style.width)/cw, 0.02, 1);
+      b.h = clamp(parseFloat(m.style.height)/ch, 0.02, 1);
+      drawEditor(); renderThumbs();
+    });
+    wrap.appendChild(m);
+  });
+  $("#delBox").disabled = curSel===0;
 }
-function syncBox(){
-  const cw = edC.width, ch = edC.height, b = cur.box;
-  b.x = clamp(parseFloat(mask.style.left)/cw, 0, 1-b.w);
-  b.y = clamp(parseFloat(mask.style.top)/ch, 0, 1-b.h);
-  b.w = clamp(parseFloat(mask.style.width)/cw, 0.02, 1);
-  b.h = clamp(parseFloat(mask.style.height)/ch, 0.02, 1);
-}
-const clamp = (v,a,b)=>Math.min(b,Math.max(a,v));
-let drag=null;
-mask.addEventListener("pointerdown", e=>{
-  e.preventDefault(); mask.setPointerCapture(e.pointerId);
-  const onHd = e.target.id==="hd";
-  drag = {onHd, sx:e.clientX, sy:e.clientY,
-    l:parseFloat(mask.style.left), t:parseFloat(mask.style.top),
-    w:parseFloat(mask.style.width), h:parseFloat(mask.style.height)};
-});
-mask.addEventListener("pointermove", e=>{
-  if(!drag) return;
-  const dx = e.clientX-drag.sx, dy = e.clientY-drag.sy, cw=edC.width, ch=edC.height;
-  if(drag.onHd){
-    mask.style.width  = clamp(drag.w+dx, cw*0.03, cw-drag.l)+"px";
-    mask.style.height = clamp(drag.h+dy, ch*0.03, ch-drag.t)+"px";
-  }else{
-    mask.style.left = clamp(drag.l+dx, 0, cw-drag.w)+"px";
-    mask.style.top  = clamp(drag.t+dy, 0, ch-drag.h)+"px";
-  }
-});
-mask.addEventListener("pointerup", ()=>{ if(drag){drag=null; syncBox(); drawEditor(); renderThumbs();} });
+$("#addBox").onclick = ()=>{
+  if(!cur) return;
+  cur.boxes.push({x:0.3, y:0.4, w:parseFloat($("#wRange").value)/100, h:parseFloat($("#hRange").value)/100});
+  curSel = cur.boxes.length-1;
+  drawEditor();
+};
+$("#delBox").onclick = ()=>{
+  if(!cur || curSel===0) return;
+  cur.boxes.splice(curSel,1);
+  curSel = 0;
+  drawEditor(); renderThumbs();
+};
 $("#edBack").onclick = ()=>{ ed.classList.remove("open"); cur=null; renderThumbs(); };
 $("#applyAll").onclick = ()=>{
   if(!cur) return;
-  items.forEach(i=>{ if(i!==cur) i.box = {...cur.box}; });
-  renderThumbs(); toast("Box applied to all photos");
+  items.forEach(i=>{ if(i!==cur) i.boxes = cur.boxes.map(b=>({...b})); });
+  renderThumbs(); toast("Boxes applied to all photos");
 };
 $("#edSave").onclick = async ()=>{ if(cur){ await saveOne(cur); toast("Saved"); } };
 
@@ -404,7 +551,8 @@ function baseName(name){ return name.replace(/\.[^.]+$/,""); }
 async function blobOf(it){
   const c = process(it);
   const type = (it.file.type === "image/png") ? "image/png" : "image/jpeg";
-  return await new Promise(r=>c.toBlob(r,type,0.92));
+  if(it.ocrJob) await it.ocrJob;
+  return await new Promise(r=>c.toBlob(r,type,1.0));
 }
 async function saveOne(it){
   const b = await blobOf(it);
@@ -430,6 +578,8 @@ async function saveAll(){
     }
   }
   hideBusy();
+  const oc = items.reduce((n,i)=>n+(i.ocrCount||0),0);
+  if(oc) toast(oc+" date"+(oc>1?"s":"")+" found & covered");
   if(navigator.canShare && navigator.canShare({files})){
     try{ await navigator.share({files}); toast("Done"); return; }
     catch(e){ if(e.name==="AbortError") return; }

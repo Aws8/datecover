@@ -1,11 +1,17 @@
-const CACHE = "datecover-v3";
+const CACHE = "datecover-v14";
 const ASSETS = [
   "./",
   "index.html",
   "manifest.webmanifest",
   "icons/icon-180.png",
   "icons/icon-192.png",
-  "icons/icon-512.png"
+  "icons/icon-512.png",
+  "ocr/tesseract.min.js",
+  "ocr/worker.min.js",
+  "ocr/tesseract-core-simd-lstm.wasm.js",
+  "ocr/tesseract-core-simd.wasm.js",
+  "ocr/tesseract-core.wasm.js",
+  "ocr/eng.traineddata"
 ];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
