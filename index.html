@@ -143,7 +143,7 @@
 <body>
 <header>
   <h1>DateCover</h1>
-  <span class="ver" id="ver">v1.9.2</span>
+  <span class="ver" id="ver">v1.9.3</span>
   <span class="count" id="count"></span>
 </header>
 
@@ -215,7 +215,7 @@
 
 <script src="ocr/tesseract.min.js"></script>
 <script>
-const VERSION = "v1.9.2";
+const VERSION = "v1.9.3";
 "use strict";
 /* ---------- state ---------- */
 const items = [];            // {id,name,file,img,w,h,box:{x,y,w,h},proc}
@@ -711,7 +711,7 @@ function renderMasks(){
       e.preventDefault(); e.stopPropagation();
       curSel = idx;
       wrap.querySelectorAll(".mask").forEach((mm,i)=>mm.classList.toggle("sel", i===idx));
-      m.setPointerCapture(e.pointerId);
+      try{ m.setPointerCapture(e.pointerId); }catch(err){}
       const onHd = e.target===hd;
       drag = {onHd, sx:e.clientX, sy:e.clientY,
         l:parseFloat(m.style.left), t:parseFloat(m.style.top),
@@ -773,7 +773,7 @@ function sizeBrushLayer(){
 let bstroke = null;
 bl.addEventListener("pointerdown", e=>{
   if(tool!=="brush" || !cur) return;
-  e.preventDefault(); bl.setPointerCapture(e.pointerId);
+  e.preventDefault(); try{ bl.setPointerCapture(e.pointerId); }catch(err){}
   const r = bl.getBoundingClientRect();
   bstroke = {pts:[[ (e.clientX-r.left)/r.width, (e.clientY-r.top)/r.height ]], size:brushSize};
 });
