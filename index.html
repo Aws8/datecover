@@ -139,7 +139,7 @@
 <body>
 <header>
   <h1>DateCover</h1>
-  <span class="ver" id="ver">v1.8</span>
+  <span class="ver" id="ver">v1.9</span>
   <span class="count" id="count"></span>
 </header>
 
@@ -167,6 +167,8 @@
     <input type="range" id="hRange" min="3" max="16" value="7">
     <label>Card every 5</label>
     <input type="checkbox" id="sepToggle" class="sw" checked>
+    <label>Auto-dates</label>
+    <input type="checkbox" id="ocrToggle" class="sw">
   </div>
 </div>
 
@@ -209,7 +211,7 @@
 
 <script src="ocr/tesseract.min.js"></script>
 <script>
-const VERSION = "v1.8";
+const VERSION = "v1.9";
 "use strict";
 /* ---------- state ---------- */
 const items = [];            // {id,name,file,img,w,h,box:{x,y,w,h},proc}
@@ -421,8 +423,10 @@ async function addFiles(list){
       const {img,w,h,url} = await loadImage(f);
       const it = {id:++seq, name:f.name||("photo-"+seq), file:f, img, w, h, url, boxes:[detectStamp(img,w,h)||newBox()], strokes:[], ocrCount:0};
       items.push(it);
-      it.ocrJob = ocrDates(it).then(boxes=>{ it.boxes.push(...boxes); it.ocrCount = boxes.length; it.ocrJob = null; renderThumbs(); })
-        .catch(e=>{ console.warn("ocr", e); it.ocrJob = null; });
+      if($("#ocrToggle").checked){
+        it.ocrJob = ocrDates(it).then(boxes=>{ it.boxes.push(...boxes); it.ocrCount = boxes.length; it.ocrJob = null; renderThumbs(); })
+          .catch(e=>{ console.warn("ocr", e); it.ocrJob = null; });
+      }
     }catch(e){ console.warn("skip", f.name, e); }
   }
   hideBusy(); renderThumbs();
@@ -538,6 +542,8 @@ async function ocrDates(it){
     return ox*oy < b.w*b.h*0.6;
   });
 }
+$("#ocrToggle").checked = localStorage.getItem("ocrOn")==="1";
+$("#ocrToggle").onchange = ()=>localStorage.setItem("ocrOn", $("#ocrToggle").checked?"1":"0");
 $("#addBtn").onclick = ()=>file.click();
 $("#drop").onclick = ()=>file.click();
 file.onchange = ()=>{ addFiles(file.files); file.value=""; };
