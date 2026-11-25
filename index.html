@@ -79,6 +79,10 @@
   .ed .bar button:disabled{opacity:.4}
   .mask .hd{position:absolute;width:34px;height:34px;right:-18px;bottom:-18px;border-radius:50%;
     background:var(--acc);border:2px solid #fff;touch-action:none}
+  #brushLayer{position:absolute;left:0;top:0;touch-action:none;pointer-events:none}
+  #brushLayer.active{pointer-events:auto}
+  #toolSeg{display:flex;background:var(--panel2,#1a2027);border-radius:10px}
+  #toolSeg button{padding:9px 13px;font-size:13px}
   .ed .bar{display:flex;gap:8px;padding:10px 14px calc(10px + var(--safe-b));background:var(--panel);
     border-top:1px solid var(--line);align-items:center;flex-wrap:wrap}
   .ed .nav{position:absolute;top:calc(10px + env(safe-area-inset-top,0px));left:0;right:0;display:flex;
@@ -96,7 +100,7 @@
 <body>
 <header>
   <h1>DateCover</h1>
-  <span class="ver" id="ver">v1.4</span>
+  <span class="ver" id="ver">v1.5</span>
   <span class="count" id="count"></span>
 </header>
 
@@ -134,11 +138,17 @@
   <div class="stage" id="stage">
     <div class="imgwrap" id="imgwrap">
       <canvas id="edCanvas"></canvas>
+      <canvas id="brushLayer"></canvas>
     </div>
   </div>
   <div class="bar">
+    <div class="seg" id="toolSeg">
+      <button data-t="box" class="on">Box</button>
+      <button data-t="brush">Brush</button>
+    </div>
     <button class="btn" id="addBox">+ Box</button>
     <button class="btn ghost" id="delBox">Delete box</button>
+    <button class="btn ghost" id="undoBrush">Undo</button>
     <button class="btn ghost" id="applyAll">Same box for all</button>
     <div class="seg" id="edModeSeg">
       <button data-m="blur" class="on">Blur</button>
@@ -153,7 +163,7 @@
 
 <script src="ocr/tesseract.min.js"></script>
 <script>
-const VERSION = "v1.4";
+const VERSION = "v1.5";
 "use strict";
 /* ---------- state ---------- */
 const items = [];            // {id,name,file,img,w,h,box:{x,y,w,h},proc}
@@ -264,6 +274,7 @@ function process(it, tw, th){
   const x = c.getContext("2d");
   x.drawImage(it.img, 0, 0, w, h);
   for(const b of it.boxes) applyCover(x, w, h, b, mode);
+  if(it.strokes) for(const st of it.strokes) applyStroke(x, w, h, st, mode);
   if(!tw) return c;
   const s = Math.min(tw/w, th/h, 1);
   const o = document.createElement("canvas");
@@ -288,6 +299,49 @@ function applyCover(x, w, h, box, m){
     if("filter" in x){ const r = Math.max(8,Math.round(bh/4)); x.filter = `blur(${r}px)`; x.drawImage(t,0,0,t.width,t.height,bx,by,bw,bh); x.filter = "none"; }
     x.restore();
   }
+}
+
+function strokePath(cx, pts, lw, style){
+  cx.save();
+  cx.strokeStyle = style; cx.lineWidth = lw;
+  cx.lineCap = "round"; cx.lineJoin = "round";
+  cx.beginPath();
+  cx.moveTo(pts[0][0], pts[0][1]);
+  for(let i=1;i<pts.length;i++) cx.lineTo(pts[i][0], pts[i][1]);
+  if(pts.length===1) cx.lineTo(pts[0][0]+0.5, pts[0][1]+0.5);
+  cx.stroke();
+  cx.restore();
+}
+function applyStroke(x, w, h, st, m){
+  const lw = st.size*Math.min(w,h);
+  const pts = st.pts.map(p=>[p[0]*w, p[1]*h]);
+  if(m === "black"){ strokePath(x, pts, lw, "#000"); return; }
+  // blur inside the stroke: mosaic the bbox region, keep it only where the stroke passes
+  let x0=1e9,y0=1e9,x1=-1,y1=-1;
+  for(const p of pts){ x0=Math.min(x0,p[0]); y0=Math.min(y0,p[1]); x1=Math.max(x1,p[0]); y1=Math.max(y1,p[1]); }
+  const pad = lw;
+  x0=Math.max(0,Math.floor(x0-pad)); y0=Math.max(0,Math.floor(y0-pad));
+  x1=Math.min(w,Math.ceil(x1+pad)); y1=Math.min(h,Math.ceil(y1+pad));
+  const bw=x1-x0, bh=y1-y0;
+  if(bw<2||bh<2) return;
+  const bc = document.createElement("canvas"); bc.width=bw; bc.height=bh;
+  const bx2 = bc.getContext("2d");
+  // mosaic
+  const t = document.createElement("canvas");
+  const k = Math.max(5, Math.round(lw/2));
+  t.width=Math.max(1,Math.round(bw/k)); t.height=Math.max(1,Math.round(bh/k));
+  t.getContext("2d").drawImage(x.canvas, x0,y0,bw,bh, 0,0,t.width,t.height);
+  bx2.imageSmoothingEnabled = true; bx2.imageSmoothingQuality = "high";
+  bx2.drawImage(t,0,0,t.width,t.height,0,0,bw,bh);
+  if("filter" in bx2){ bx2.filter = `blur(${Math.max(6,Math.round(lw/3))}px)`; bx2.drawImage(t,0,0,t.width,t.height,0,0,bw,bh); bx2.filter="none"; }
+  // stroke mask
+  const mc = document.createElement("canvas"); mc.width=bw; mc.height=bh;
+  const mx = mc.getContext("2d");
+  strokePath(mx, pts.map(p=>[p[0]-x0,p[1]-y0]), lw, "#fff");
+  bx2.globalCompositeOperation = "destination-in";
+  bx2.drawImage(mc,0,0);
+  bx2.globalCompositeOperation = "source-over";
+  x.drawImage(bc, x0, y0);
 }
 
 /* ---------- thumbnails ---------- */
@@ -321,7 +375,7 @@ async function addFiles(list){
   for(const f of fs){
     try{
       const {img,w,h,url} = await loadImage(f);
-      const it = {id:++seq, name:f.name||("photo-"+seq), file:f, img, w, h, url, boxes:[detectStamp(img,w,h)||newBox()], ocrCount:0};
+      const it = {id:++seq, name:f.name||("photo-"+seq), file:f, img, w, h, url, boxes:[detectStamp(img,w,h)||newBox()], strokes:[], ocrCount:0};
       items.push(it);
       it.ocrJob = ocrDates(it).then(boxes=>{ it.boxes.push(...boxes); it.ocrCount = boxes.length; it.ocrJob = null; renderThumbs(); })
         .catch(e=>{ console.warn("ocr", e); it.ocrJob = null; });
@@ -476,6 +530,8 @@ function drawEditor(){
   edC.width = cv.width; edC.height = cv.height;
   edC.getContext("2d").drawImage(cv,0,0);
   edC.style.width = cv.width+"px"; edC.style.height = cv.height+"px";
+  sizeBrushLayer();
+  bl.classList.toggle("active", tool==="brush");
   renderMasks();
 }
 function renderMasks(){
@@ -484,6 +540,7 @@ function renderMasks(){
   cur.boxes.forEach((b, idx)=>{
     const m = document.createElement("div");
     m.className = "mask"+(idx===curSel?" sel":"")+(mode==="black"?" black":"");
+    m.style.pointerEvents = (typeof tool!=="undefined" && tool==="brush") ? "none" : "auto";
     const hd = document.createElement("div"); hd.className="hd"; m.appendChild(hd);
     m.style.left = (b.x*cw)+"px"; m.style.top = (b.y*ch)+"px";
     m.style.width = (b.w*cw)+"px"; m.style.height = (b.h*ch)+"px";
@@ -535,10 +592,52 @@ $("#delBox").onclick = ()=>{
   drawEditor(); renderThumbs();
 };
 $("#edBack").onclick = ()=>{ ed.classList.remove("open"); cur=null; renderThumbs(); };
+
+/* ---------- brush tool ---------- */
+let tool = "box", brushSize = 0.05;
+const bl = $("#brushLayer"), blx = bl.getContext("2d");
+$("#toolSeg").onclick = e=>{
+  if(!e.target.dataset.t) return;
+  tool = e.target.dataset.t;
+  document.querySelectorAll("#toolSeg button").forEach(b=>b.classList.toggle("on", b.dataset.t===tool));
+  bl.classList.toggle("active", tool==="brush");
+  if(cur) renderMasks();
+};
+function sizeBrushLayer(){
+  bl.width = edC.width; bl.height = edC.height;
+  bl.style.width = edC.style.width; bl.style.height = edC.style.height;
+}
+let bstroke = null;
+bl.addEventListener("pointerdown", e=>{
+  if(tool!=="brush" || !cur) return;
+  e.preventDefault(); bl.setPointerCapture(e.pointerId);
+  const r = bl.getBoundingClientRect();
+  bstroke = {pts:[[ (e.clientX-r.left)/bl.width, (e.clientY-r.top)/bl.height ]], size:brushSize};
+});
+bl.addEventListener("pointermove", e=>{
+  if(!bstroke) return;
+  const r = bl.getBoundingClientRect();
+  bstroke.pts.push([ (e.clientX-r.left)/bl.width, (e.clientY-r.top)/bl.height ]);
+  blx.clearRect(0,0,bl.width,bl.height);
+  strokePath(blx, bstroke.pts.map(p=>[p[0]*bl.width,p[1]*bl.height]), brushSize*Math.min(bl.width,bl.height),
+    mode==="black" ? "rgba(0,0,0,.9)" : "rgba(79,140,255,.65)");
+});
+bl.addEventListener("pointerup", ()=>{
+  if(!bstroke) return;
+  if(bstroke.pts.length>1) cur.strokes.push(bstroke);
+  bstroke = null;
+  blx.clearRect(0,0,bl.width,bl.height);
+  drawEditor(); renderThumbs();
+});
+$("#undoBrush").onclick = ()=>{
+  if(!cur) return;
+  if(cur.strokes.length){ cur.strokes.pop(); drawEditor(); renderThumbs(); }
+  else toast("Nothing to undo");
+};
 $("#applyAll").onclick = ()=>{
   if(!cur) return;
-  items.forEach(i=>{ if(i!==cur) i.boxes = cur.boxes.map(b=>({...b})); });
-  renderThumbs(); toast("Boxes applied to all photos");
+  items.forEach(i=>{ if(i!==cur){ i.boxes = cur.boxes.map(b=>({...b})); i.strokes = cur.strokes.map(s=>({size:s.size, pts:s.pts.map(p=>[...p])})); } });
+  renderThumbs(); toast("Applied to all photos");
 };
 $("#edSave").onclick = async ()=>{ if(cur){ await saveOne(cur); toast("Saved"); } };
 
